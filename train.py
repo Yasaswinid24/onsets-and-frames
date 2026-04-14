@@ -1,5 +1,13 @@
 import os
+import pprint
 from datetime import datetime
+
+# sacred 0.7.4 calls pprint._safe_repr which was removed in newer Python builds.
+# Restore it as a simple shim before sacred is imported.
+if not hasattr(pprint, '_safe_repr'):
+    def _safe_repr(obj, context, maxlevels, level, sort_dicts=True):
+        return repr(obj), True, False
+    pprint._safe_repr = _safe_repr
 
 import numpy as np
 from sacred import Experiment
@@ -21,7 +29,7 @@ ex = Experiment('train_transcriber')
 def config():
     logdir = 'runs/transcriber-' + datetime.now().strftime('%y%m%d-%H%M%S')
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    iterations = 500000
+    iterations = 1000 #500000
     resume_iteration = None
     checkpoint_interval = 1000
     train_on = 'MAESTRO'
@@ -31,7 +39,7 @@ def config():
     model_complexity = 48
 
     if torch.cuda.is_available() and torch.cuda.get_device_properties(torch.cuda.current_device()).total_memory < 10e9:
-        batch_size //= 2
+        # batch_size //= 2
         sequence_length //= 2
         print(f'Reducing batch size to {batch_size} and sequence_length to {sequence_length} to save memory')
 
@@ -94,11 +102,10 @@ def train(logdir, device, iterations, resume_iteration, checkpoint_interval, tra
         loss = sum(losses.values())
         optimizer.zero_grad()
         loss.backward()
-        optimizer.step()
-        scheduler.step()
-
         if clip_gradient_norm:
             clip_grad_norm_(model.parameters(), clip_gradient_norm)
+        optimizer.step()
+        scheduler.step()
 
         for key, value in {'loss': loss, **losses}.items():
             writer.add_scalar(key, value.item(), global_step=i)
