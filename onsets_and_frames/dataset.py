@@ -7,7 +7,7 @@ import numpy as np
 import soundfile
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
+from .mel import MelSpectrogram
 from .constants import *
 from .midi import parse_midi
 
@@ -19,7 +19,10 @@ class PianoRollAudioDataset(Dataset):
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
-
+        self.mel = MelSpectrogram(
+            N_MELS, SAMPLE_RATE, WINDOW_LENGTH, HOP_LENGTH,
+            mel_fmin=MEL_FMIN, mel_fmax=MEL_FMAX
+        ).to(device)
         self.data = []
         print(f"Loading {len(groups)} group{'s' if len(groups) > 1 else ''} "
               f"of {self.__class__.__name__} at {path}")
@@ -53,7 +56,7 @@ class PianoRollAudioDataset(Dataset):
         result['offset'] = (result['label'] == 1).float()
         result['frame'] = (result['label'] > 1).float()
         result['velocity'] = result['velocity'].float().div_(128.0)
-
+        result['features'] = self.mel(result['audio'].unsqueeze(0)[:, :-1]).squeeze(0)
         return result
 
     def __len__(self):
@@ -175,8 +178,10 @@ class MAPS(PianoRollAudioDataset):
 
     def files(self, group):
         flacs = glob(os.path.join(self.path, 'flac', '*_%s.flac' % group))
-        tsvs = [f.replace('/flac/', '/tsv/matched/').replace('.flac', '.tsv') for f in flacs]
-
+        tsvs=[
+            os.path.join(self.path, 'tsv','matched', os.path.basename(flac).replace('.flac', '.tsv'))
+            for flac in flacs
+        ]
         assert(all(os.path.isfile(flac) for flac in flacs))
         assert(all(os.path.isfile(tsv) for tsv in tsvs))
 

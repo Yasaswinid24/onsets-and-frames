@@ -95,8 +95,3 @@ class MelSpectrogram(torch.nn.Module):
         mel_output = torch.matmul(self.mel_basis, magnitudes)
         mel_output = torch.log(torch.clamp(mel_output, min=1e-5))
         return mel_output
-
-
-# the default melspectrogram converter across the project
-melspectrogram = MelSpectrogram(N_MELS, SAMPLE_RATE, WINDOW_LENGTH, HOP_LENGTH, mel_fmin=MEL_FMIN, mel_fmax=MEL_FMAX)
-melspectrogram.to(DEFAULT_DEVICE)

@@ -7,9 +7,7 @@ A rough translation of Magenta's Onsets and Frames implementation [1].
 import torch
 import torch.nn.functional as F
 from torch import nn
-
 from .lstm import BiLSTM
-from .mel import melspectrogram
 
 
 class ConvStack(nn.Module):
@@ -50,26 +48,27 @@ class ConvStack(nn.Module):
 
 
 class OnsetsAndFrames(nn.Module):
-    def __init__(self, input_features, output_features, model_complexity=48):
+    def __init__(self, input_features, output_features, model_complexity=48, n_input_bins=None):
         super().__init__()
 
+        n_input_bins = n_input_bins if n_input_bins is not None else input_features
         model_size = model_complexity * 16
         sequence_model = lambda input_size, output_size: BiLSTM(input_size, output_size // 2)
 
         self.onset_stack = nn.Sequential(
-            ConvStack(input_features, model_size),
+            ConvStack(n_input_bins, model_size),
             sequence_model(model_size, model_size),
             nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.offset_stack = nn.Sequential(
-            ConvStack(input_features, model_size),
+            ConvStack(n_input_bins, model_size),
             sequence_model(model_size, model_size),
             nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
         self.frame_stack = nn.Sequential(
-            ConvStack(input_features, model_size),
+            ConvStack(n_input_bins, model_size),
             nn.Linear(model_size, output_features),
             nn.Sigmoid()
         )
@@ -79,7 +78,7 @@ class OnsetsAndFrames(nn.Module):
             nn.Sigmoid()
         )
         self.velocity_stack = nn.Sequential(
-            ConvStack(input_features, model_size),
+            ConvStack(n_input_bins, model_size),
             nn.Linear(model_size, output_features)
         )
 
@@ -99,7 +98,7 @@ class OnsetsAndFrames(nn.Module):
         frame_label = batch['frame']
         velocity_label = batch['velocity']
 
-        mel = melspectrogram(audio_label.reshape(-1, audio_label.shape[-1])[:, :-1]).transpose(-1, -2)
+        mel = batch['features'].transpose(-1, -2)
         onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)
 
         predictions = {
@@ -124,4 +123,3 @@ class OnsetsAndFrames(nn.Module):
             return denominator
         else:
             return (onset_label * (velocity_label - velocity_pred) ** 2).sum() / denominator
-
