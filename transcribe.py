@@ -3,64 +3,43 @@ import os
 import sys
 
 import numpy as np
-import soundfile
 import torch
 from mir_eval.util import midi_to_hz
 
 from onsets_and_frames import *
-from onsets_and_frames.mel import MelSpectrogram
 
 
-def load_and_process_audio(flac_path, sequence_length, device):
-    random = np.random.RandomState(seed=42)
+def transcribe(model, flac_path, device):
+    """
+    Load precomputed features and run transcription.
+    """
+    feature_path = flac_path.replace('.flac', '.mel.pt').replace('.wav', '.mel.pt')
 
-    audio, sr = soundfile.read(flac_path, dtype='int16')
-    assert sr == SAMPLE_RATE
+    if not os.path.exists(feature_path):
+        raise RuntimeError(
+            f"Missing feature file: {feature_path}\n"
+            f"Run preprocess.py first."
+        )
 
-    audio = torch.ShortTensor(audio)
+    # Load features: shape (n_mels, T)
+    features = torch.load(feature_path).to(device)
 
-    if sequence_length is not None:
-        audio_length = len(audio)
-        step_begin = random.randint(audio_length - sequence_length) // HOP_LENGTH
-
-        begin = step_begin * HOP_LENGTH
-        end = begin + sequence_length
-
-        audio = audio[begin:end].to(device)
-    else:
-        audio = audio.to(device)
-
-    audio = audio.float().div_(32768.0)
-
-    return audio
-
-
-def transcribe(model, audio):
-    # create feature extractor on the same device as audio, with full constants
-    mel_transform = MelSpectrogram(
-        N_MELS, SAMPLE_RATE, WINDOW_LENGTH, HOP_LENGTH,
-        mel_fmin=MEL_FMIN, mel_fmax=MEL_FMAX
-    ).to(audio.device)
-
-    # match the reshape used in run_on_batch / original pipeline
-    features = mel_transform(audio.reshape(-1, audio.shape[-1])[:, :-1])
-
-    # transpose to [batch, time, bins] as expected by the model
-    features = features.transpose(-1, -2)
+    # Convert to model input: (1, T, n_mels)
+    features = features.unsqueeze(0).transpose(-1, -2)
 
     onset_pred, offset_pred, _, frame_pred, velocity_pred = model(features)
 
     predictions = {
-        'onset': onset_pred.reshape((onset_pred.shape[1], onset_pred.shape[2])),
-        'offset': offset_pred.reshape((offset_pred.shape[1], offset_pred.shape[2])),
-        'frame': frame_pred.reshape((frame_pred.shape[1], frame_pred.shape[2])),
-        'velocity': velocity_pred.reshape((velocity_pred.shape[1], velocity_pred.shape[2]))
+        'onset': onset_pred.squeeze(0),
+        'offset': offset_pred.squeeze(0),
+        'frame': frame_pred.squeeze(0),
+        'velocity': velocity_pred.squeeze(0)
     }
 
     return predictions
 
 
-def transcribe_file(model_file, flac_paths, save_path, sequence_length,
+def transcribe_file(model_file, flac_paths, save_path,
                     onset_threshold, frame_threshold, device):
 
     model = torch.load(model_file, map_location=device).eval()
@@ -69,8 +48,7 @@ def transcribe_file(model_file, flac_paths, save_path, sequence_length,
     for flac_path in flac_paths:
         print(f'Processing {flac_path}...', file=sys.stderr)
 
-        audio = load_and_process_audio(flac_path, sequence_length, device)
-        predictions = transcribe(model, audio)
+        predictions = transcribe(model, flac_path, device)
 
         p_est, i_est, v_est = extract_notes(
             predictions['onset'],
@@ -98,7 +76,6 @@ if __name__ == '__main__':
     parser.add_argument('model_file', type=str)
     parser.add_argument('flac_paths', type=str, nargs='+')
     parser.add_argument('--save-path', type=str, default='.')
-    parser.add_argument('--sequence-length', default=None, type=int)
     parser.add_argument('--onset-threshold', default=0.5, type=float)
     parser.add_argument('--frame-threshold', default=0.5, type=float)
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')

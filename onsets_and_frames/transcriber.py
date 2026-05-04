@@ -92,14 +92,14 @@ class OnsetsAndFrames(nn.Module):
         return onset_pred, offset_pred, activation_pred, frame_pred, velocity_pred
 
     def run_on_batch(self, batch):
-        audio_label = batch['audio']
         onset_label = batch['onset']
         offset_label = batch['offset']
         frame_label = batch['frame']
         velocity_label = batch['velocity']
 
-        mel = batch['features'].transpose(-1, -2)
-        onset_pred, offset_pred, _, frame_pred, velocity_pred = self(mel)
+        # features shape from dataset: (batch, n_mels, T) → transpose to (batch, T, n_mels)
+        features = batch['features'].transpose(-1, -2)
+        onset_pred, offset_pred, _, frame_pred, velocity_pred = self(features)
 
         predictions = {
             'onset': onset_pred.reshape(*onset_label.shape),
